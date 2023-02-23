@@ -1,0 +1,119 @@
+---
+title: "Topic ideas"
+author: "Outliers: Matthew Hawkins, Aston Yong, Catherine Ning"
+date: "October 7, 2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      warning = FALSE, 
+                      message = FALSE)
+```
+
+
+```{r load-packages}
+library(tidyverse) 
+# load other packages as needed
+``` 
+
+```{r load-data}
+# load all data sets 
+raw_bechdel <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-03-09/raw_bechdel.csv')
+movies <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-03-09/movies.csv')
+speed_dating <- read_csv("SpeedDating.csv") 
+```
+
+# Data Set 1
+
+## Introduction and Data
+
+(Introduce and discuss data here)
+Bechdel Test Data Set
+
+The data set comes from FiveThirtyEight, and, more specifically, from an article
+written on FiveThirtyEight’s website.
+
+The data was collected in a community-sourced manner, scoring a movie on a 
+Bechdel test and then linking that score with an existing IMDB link which includes
+an array of other variables associated with that movie.
+
+The observations are movies produced between 1970 and 2013, and the characteristics
+are different descriptors of the movie, regarding their production, their revenue,
+and their score on the Bechdel Test
+
+The Bechdel test is a measure of the representation of women in a film, and it 
+is on a scale of 0-3
+  First: The film must have two named women to get the first point.
+  
+  Second: The two women must talk to each other (or two women in the film must 
+  have a conversation with each other) to get the second point.
+  
+  Third: The conversation must be about something other than a man to get the 
+  third point.
+  
+
+
+
+## Research questions 
+
+Does the Bechdel Test score have a significant effect on box office revenue?
+Additionally, what factors (year, budget, plot, etc.) correlate with Bechdel test score?
+
+``` {r glimpse-Bechdel}
+glimpse(raw_bechdel)
+
+```
+
+``` {r glimpse-movies}
+glimpse(movies)
+
+```
+
+``` {r glimpse_combined}
+bechdel <- left_join(movies, raw_bechdel)
+glimpse(bechdel)
+```
+
+We combined the two data sets above into a single data set for use in the project.
+Additionally, we will filter out missing values as we use the data to avoid 
+errors and faulty conclusions.
+
+# Data Set 2
+
+## Introduction and Data
+
+(Introduce and discuss data here)
+Speed Dating Data Set
+
+The data comes from a 2006 study by Raymond Fisman, Sheena S. Iyengar, Emir Kamenica, Itamar Simonson in The Quarterly Journal of Economics. The study of Columbia University students seeks to analyze gender differences in dating preferences. 
+
+Data was collected from a Speed Dating experiment on Columbia students where Fisman and Iyengar generated random matchings and random variation in the number of potential partners. Participants had 4 minute conversations with each other and answered a survey of questions after. The meetings took place at local restaurants/bars during 2002-2004. There were 392 subjects and over 8,000 observations.
+
+The dataset is substantial with over 8,000 observations with regards to a speed dating test conducted over the period of 2002-2004. These observations record attributes including gender, race, income, as well as perceived attractiveness in a scale of 1-10.
+
+## Research questions 
+
+(Discuss research questions here)
+
+Do race, gender, and income impact the rating by their partner during speed dating?
+Is there a relationship between age/background variables and desired date chracteristics?
+
+
+
+
+
+# Glimpse of data sets
+
+## Data set 1
+
+```{r glimpse-1}
+glimpse(movies)
+```
+
+## Data set 2
+
+```{r glimpse-2}
+glimpse(speed_dating)
+```
+

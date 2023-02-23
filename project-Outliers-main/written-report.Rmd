@@ -1,0 +1,497 @@
+---
+title: "Written Report"
+author: "Outliers: Matthew Hawkins, Aston Yong, Catherine Ning"
+date: "November 11, 2021"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## 1. Introduction and Data
+
+For this project, we are looking into the Himalayan database, which is a
+compilation of all expeditions that have climbed in the Nepal Himalaya.
+The data cover all expeditions from 1905 through Spring 2019 to more
+than 465 significant peaks in Nepal. Also included are expeditions to
+both sides of border peaks such as Everest, Cho Oyu, Makalu and
+Kangchenjunga as well as to some smaller border peaks. Data on
+expeditions to trekking peaks are included for early attempts, first
+ascents and major accidents. The main research question we are hoping to
+solve involves looking into various different factors which can predict
+the safety and success of the expedition.
+
+Many active climbers view the Himalayas as the proverbial "summit" of
+their climbing experience. These mountains provide a demanding and often
+dangerous task so, the most important goal for climbers is safety and
+success. We want to create a model that find the most significant
+factors for safe and successful expeditions so that future climbers can
+predict probabilities of safe, successful climbs. Climbing the Himalayas
+is still a dangerous and risky activity, and increased congestion is
+changing the dynamic of climbing
+(<http://graphics.reuters.com/NEPAL-EVEREST/0100B4S22JR/index.html>).
+Therefore, examining these dataset predictors and drawing insights from
+them will hopefully improve mountain climbing preparedness.
+
+We wish to explore the following research question:
+
+What expedition factors are most predictive of safe and successful
+expeditions and what is the probability of success given these
+predictors?
+
+We hypothesize expeditions with conditions like lower peaks,
+historically climbed peaks, more members, warm seasons, younger average
+age, and more recent year to have greater probability of safe success.
+
+The data cover all expeditions from 1905 through Spring 2019 to more
+than 465 significant peaks in Nepal. It is divided into 3 tables, one
+for peaks, expeditions, and members respectively. The peaks.csv file
+contains information about each Himalayan mountain with data on peak
+name, whether it has been climbed, height, and other variables. The
+expeditions.csv file contains data on individual expeditions, with
+variables like member count, season, and number of deaths. The
+members.csv file is the most narrow-scoped table with demographic and
+personal information for each member on an expedition. Multiple members
+can participate in one expedition, and multiple expeditions can climb
+one peak.
+
+The database is based on the expedition archives of Elizabeth Hawley, a
+longtime journalist based in Kathmandu, and it is supplemented by
+information gathered from books, alpine journals and correspondence with
+Himalayan climbers. The database is updated bi-annuallly, and member
+information comes from submitted permit applications.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      warning = FALSE, 
+                      message = FALSE)
+```
+
+```{r load-packages}
+library(tidyverse)
+library(broom)
+library(patchwork)
+library(knitr)
+library(ggfortify) 
+library(yardstick)
+
+# load other packages as needed
+```
+
+```{r load-data}
+# load all data sets 
+members <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-22/members.csv')
+expeditions <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-22/expeditions.csv')
+peaks <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-22/peaks.csv')
+```
+
+```{r, include=FALSE}
+members %>% filter(!is.na(age)) %>% group_by(expedition_id) %>% summarize(mean_age = mean(age), member_count = n() ) %>% kable(digits = 3)
+```
+
+```{r}
+expeditions <- expeditions %>%
+  mutate(success_expedition = factor(if_else((termination_reason == "Success (main peak)") | (termination_reason == "Success (subpeak)"), "1", "0")))
+```
+
+We created our response variable,
+sucess_expedition, defining an expedition as a success or a failure
+based on the reason for the expedition's termination (Success (main peak), Success
+(subpeak), accident, bad weather, etc). A successful expedition has the value "1" 
+and an unsuccessful expedition has the value "0".
+
+
+```{r fig.width = 4, fig.height = 4}
+ggplot(data = expeditions, mapping = aes(x = success_expedition)) +
+  geom_bar() + 
+  labs(title = "Distribution of Expedition Outcomes", 
+       x = "",
+       y = "Number of Expeditions") +
+  scale_x_discrete(labels = c("1" = "Success", "0" = "Failure"))
+```
+
+```{r}
+expeditions %>%
+  count(success_expedition) %>%
+  kable(digits = 3)
+```
+
+```{r}
+success_prop <- 5707 / 10364
+failure_prop <- 4657 / 10364
+```
+
+Based on the above count and calculation, 55.1% of the 10364 expeditions
+were classified as successful. On the other hand, 44.9 of the 10364
+expeditions were classified as unsuccessful.
+
+```{r load-data—1}
+# load data set
+members_grouped <- read_csv("data/members_grouped.csv")
+```
+
+First of all, we join grouped members info and peak height into
+expeditions.
+
+```{r }
+merged_data_1<-merge(x=members_grouped,y=expeditions,by="expedition_id",all.x=TRUE)
+merged_data_2<-merge(x=merged_data_1,y=peaks,by="peak_id",all.x=TRUE)
+```
+
+We selected all the possible predictor variables we are planning to use,
+including peak height, member count, number hired members, oxygen use,
+year, season, agency, member deaths, and hired deaths. We removed all
+NAs from trekking_agency. From the members.csv file, average member age
+on an expedition calculated from grouping by expedition id.
+
+```{r include=FALSE}
+merged_data <- merged_data_2 %>%
+  select(height_metres, member_count, hired_staff, oxygen_used, year, season,
+       trekking_agency, member_deaths, hired_staff_deaths, mean_age, success_expedition)
+merged_data <- merged_data %>%
+  filter(!is.na(trekking_agency))
+merged_data
+```
+
+```{r}
+#length(unique(merged_data$trekking_agency))
+```
+
+There are over 800 trekking agencies, so to simplify the data, we only
+kept the top 10 agencies and set trekking_agency to Other for any other
+agency. To make the model intercept interpretation meaningful, we also
+mean centered the continuous variables for mean age, mountain height,
+and member count.
+
+```{r}
+merged_data <- merged_data %>%
+  mutate(trekking_agency = fct_lump(trekking_agency, 10, other_level = "Other",
+  ties.method = "first"))
+```
+
+```{r, include=FALSE}
+merged_data %>% count(trekking_agency) %>% arrange(desc(n))
+merged_data %>% count(year) %>% arrange(desc(year))
+merged_data %>% count(oxygen_used)
+merged_data %>% count(height_metres)
+```
+
+```{r fig.width = 4, fig.height = 4}
+ggplot(data = expeditions, mapping = aes(x = oxygen_used)) +
+  geom_bar() + 
+  labs(title = "Oxygen Use Distribution", 
+       x = "",
+       y = "Number of Expeditions") +
+  scale_x_discrete(labels = c("TRUE" = "Used", "FALSE" = "Not Used"))
+```
+
+In the above bar graph, we can see the portion of expeditions in which
+oxygen was used, which we believe to be a potentially important
+predictor variable. As the graph shows, a little less than a third of
+expeditions used oxygen.
+
+```{r fig.width = 4, fig.height = 4}
+ggplot(data = expeditions, mapping = aes(x = members)) + 
+  geom_histogram() +
+  labs(title = "Number of Members Histogram", x = "Number of Members in Each Group")
+```
+
+```{r}
+expeditions %>%
+  summarise(mean = mean(members), sd = sd(members), IQR = IQR(members)) %>%
+  kable(digits = 3)
+```
+
+The above histogram shows the distribution of the number of members in
+each group, another variable which we believe may be a significant
+predictor of the odds of success of an expedition. The distribution is
+right-skewed and seems like it may have a few outlier expeditions that
+have greater than 25 members in the group. The distribution is centered
+with a mean of 5.953 members, and it has a spread characterized by a
+standard deviation of 5.428 and an interquartile range of 6.
+
+
+```{r, include = FALSE}
+ggplot(data = merged_data, aes(x = height_metres)) +
+geom_histogram(binwidth = 50) +
+labs(title = "Height Distribution")
+```
+
+We also mapped out the distribution of season. We can notice that for spring and autumn, the numbers of expeditions are over 4,000 much higher than those of summer and winter, below 200. 
+
+```{r fig.width = 4, fig.height = 4}
+ggplot(data = merged_data, mapping = aes(x = season, fill = season)) +
+  geom_bar() + 
+  labs(title = "Season Distribution", 
+       x = "",
+       y = "Number of Expeditions") +
+  scale_x_discrete(labels = c("Autumn", "Spring", "Summer", "Winter"))
+```
+
+```{r}
+merged_data %>%
+  count(trekking_agency) %>%
+  kable(digits = 3)
+```
+
+According to the graph, the "other" agency has the most trekking agencies, about
+5500, while among the following trekking agencies, Thamserku and Asian trekking 
+have relatively higher number of trekking agencies compared to the rest of the agencies.
+
+```{r fig.width = 12, fig.height = 4}
+ggplot(data = merged_data, mapping = aes(x = trekking_agency, fill = trekking_agency)) +
+  geom_bar() + 
+  labs(title = "Agency Distribution", 
+       x = "",
+       y = "Number of Expeditions")+
+  coord_flip()
+```
+
+## 2. Methodology
+
+Because we want to predict success, a categorical response, we use
+logistic regression to model the log odds of expedition success versus
+failure. Probability of success must be between 0 and 1. We used forward
+selection and BIC to build our model and determine signficant predictor
+variables of odds of success. Forward selection model using BIC produces
+the following model:
+
+```{r}
+int_only <-glm(success_expedition ~ 1, data = merged_data, family = binomial)
+#tidy(int_only) %>% kable(digits = 3)
+full_model <-glm(success_expedition ~ ., data = merged_data,family = binomial)
+#tidy(full_model)  %>% kable(digits = 3)
+```
+
+```{r, include=FALSE}
+forward_select_bic <- step(int_only, scope = formula(full_model), direction = "forward", k = log(nrow(merged_data)))
+```
+
+```{r}
+tidy(forward_select_bic) %>% kable(digits = 5)
+```
+
+```{r}
+merged_data <- merged_data %>%
+  mutate(year = year-1971,
+         height_metres_cent = height_metres-mean(height_metres),
+         member_count_cent = member_count-mean(member_count),
+         mean_age_cent = mean_age-mean(mean_age),
+         oxygen_used = factor(oxygen_used),
+         season = factor(season),
+         trekking_agency = factor(trekking_agency)
+         )
+```
+
+```{r}
+library(Stat2Data)
+```
+
+In the predictor variables' empirical logit plots (Appendix 5.1), we observe 
+interaction effects between oxygen use and the quantitative predictors peak 
+height and year. We therefore add interaction terms into our model. There is also
+a clear quadratic relationship between log odds of success and mean_age_cent, so
+we transformed mean_age_cent into a quadratic term. This is expected as
+too young or too old climbers will be less prepared or fit. Year also
+showed possible quadratic relationships, but squaring year did not
+change the empirical logit plot. We decided to keep year unchanged. The
+predictor year in our model with interaction terms and quadratic
+transformed mean age had a p-value greater than 0.05, so we performed a
+drop in deviance test. The test p-value is near zero, so we keep year in
+the model.
+
+```{r}
+merged_data <- merged_data %>% mutate(
+  mean_age_cent_sq = mean_age_cent^2 #,
+#  year_sq = year^2
+)
+forward_select_bic <- glm(success_expedition ~ oxygen_used + height_metres_cent + member_count_cent +
+                            mean_age_cent + mean_age_cent_sq + hired_staff_deaths + year + 
+                            height_metres_cent*oxygen_used + year*oxygen_used, data = merged_data,
+                          family = binomial)
+```
+
+```{r results = "hide"}
+reduced_model <-glm(success_expedition ~ oxygen_used + height_metres_cent + member_count_cent +
+                            mean_age_cent + mean_age_cent_sq + hired_staff_deaths + 
+                            height_metres_cent*oxygen_used, data = merged_data,
+                          family = binomial)
+```
+
+
+```{r}
+tidy(forward_select_bic, conf.int = TRUE) %>% kable(digits = 5)
+```
+
+```{r}
+anova(reduced_model, forward_select_bic, test = "Chisq") %>%
+  kable(digits = 3)
+```
+
+```{r}
+par(mfrow = c(1,2))
+emplogitplot1(success_expedition ~ mean_age_cent_sq, data = merged_data, ngroups = 8) 
+emplogitplot2(success_expedition ~ mean_age_cent_sq + oxygen_used, data = merged_data, 
+              ngroups = 8, putlegend = "bottomright")
+
+```
+
+Checking model conditions:
+
+1.  Linearity: The empirical logit plots (above and Appendix 5.1) show a general linear
+    relationship between the log odds of success and year, peak height,
+    and hired staff deaths. There is a strong linear relationship
+    between log odds of success and member count and mean age squared.
+2.  Randomness: randomness is satisfied because the data is just a
+    record of all Himalayan expeditions, so the data collection is
+    representative of the population and is not a particular subset.
+3.  Independence: independence condition is satisfied because
+    expeditions are separate and odds of success for one expedition do
+    not tell anything about odds of success for another expedition.
+
+Multicolinearity is not an issue, as the Variance Inflation Factor (VIF)
+is greater than 10 only for oxygen_used and its interaction with year.
+This is expected as an interaction term needs the associated main
+effects.
+
+```{r}
+library(rms)
+vif(forward_select_bic) %>% kable(digits = 5)
+```
+
+## 3. Results
+
+Our final model is displayed here:
+
+```{r}
+tidy(forward_select_bic, conf.int = TRUE) %>% kable(digits = 5)
+```
+
+```{r}
+forward_select_bic_aug <- augment(forward_select_bic, type.predict = "response")
+
+
+# Need to put 1 as the first level
+forward_select_bic_aug <- forward_select_bic_aug %>%
+  mutate(success_expedition = fct_relevel(success_expedition, c("1", "0")))
+# calculate sensitivity and specificity at each threshold
+roc_curve_data <- forward_select_bic_aug %>%
+  roc_curve(success_expedition, .fitted) 
+# plot roc curve
+autoplot(roc_curve_data)
+
+forward_select_bic_aug %>%
+  roc_auc(success_expedition, .fitted) %>%
+  pull(.estimate)
+```
+
+**Interpretations:**
+
+The key predictors of expedition success are peak height, member count, mean 
+member age, staff deaths, year, and oxygen use.
+
+Intercept: For an expedition in 1971 with mean peak height of
+`r round(mean(merged_data$height_metres),3)` meters,
+`r round(mean(merged_data$member_count),3)` group members, mean age of
+`r round(mean(merged_data$mean_age),3)`, 0 staff deaths, and no oxygen
+use, we would expect the odds of a successful expedition to be
+`r round(exp(-0.12853), 3)`.
+
+Height_metres_cent: For each additional meter in the height of the peak,
+we would expect, on average, that the odds of a successful expedition
+are multiplied by `r round(exp(-0.00063), 3)`, holding all else
+constant.
+
+Member_count_cent: For each additional member in the group, we would
+expect, on average, that the odds of a successful expedition are
+multiplied by `r round(exp(0.06468), 3)`, holding all else constant.
+
+Mean_age_cent: Because of the quadratic term, mean_age_cent must be
+interpreted using the overall effect. The effect of mean_age_cent on log
+odds equals zero at mean centered mean_age of -5.285, which equals an expedition
+mean age of `r round(mean(merged_data$mean_age),3) - 5.285`. The negative coefficient
+of the quadratic term means change in log odds is positive for mean_age_cent below
+-5.285, meaning mean_age between 0 and `r round(mean(merged_data$mean_age),3) - 5.285`.
+In this interval, odds of expedition success is expected to multiply by a factor 
+greater than 1 for a one year mean_age_cent increase. Change in log odds is negative
+for mean_age_cent above -5.285, or mean age above `r round(mean(merged_data$mean_age),3)
+- 5.285`, so odds of expedition success is expected to multiply by a factor less
+than 1 for a one year mean_age_cent increase.
+
+Hired_staff_deaths: For each additional death of hired staff, we would
+expect, on average, that the odds of a successful expedition are
+multiplied by `r round(exp(-0.81198), 3)`, holding all else constant.
+
+Year: For each additional year since 1971, we would expect, on average,
+that the odds of a successful expedition are multiplied by
+`r round(exp(-0.00155), 3)`, holding all else constant.
+
+Oxygen_usedTRUE: If oxygen were used, we would expect, on average, that
+the odds of a successful expedition are multiplied by
+`r round(exp(-0.77096), 3)`, holding all else constant.
+
+height_metres:oxygen_usedTRUE: If oxygen were used, we would expect, on
+average, that for every one meter increase in the height of the peak,
+the odds of a successful expedition are multiplied by
+`r round(exp(0.00098), 3)`, holding all else constant.
+
+year:oxygen_usedTRUE: If oxygen were used, we would expect, on average,
+that for every additional year since 1971, the odds of a successful
+expedition are multiplied by `r round(exp(0.06035), 3)`, holding all
+else constant.
+
+**Findings**
+
+The AUC value of 0.747 indicates that our model has a good fit to the data and 
+can predict expedition success outcomes with high sensitivity and low false 
+positive rates. The key predictors of expedition success found are all reasonable.
+Climbers too young or too old would have a lower probability of success, explaining
+the quadratic relationship. Oxygen use may indicate higher elevation or health 
+complications, negatively impactimpacting on log odds of success. The surprising
+finding that log odds of success declines with year may reflect the growing access
+to mountain climbing. More amateur climbers in the Himalayas translates into 
+decreasing log odds of success.
+
+## 4. Discussion and Conclusion
+
+Through this research we learned that the most significant predictors of expedition success were peak height, member count, mean member age, staff deaths,  year, and oxygen use. Higher peaks, staff, deaths, particularly young or old age, and use of oxygen reduced log odds of success. Expeditions further in the past and with more members had higher log odds of success. Our model with these predictors minimized BIC and created the simplest model for prediction. All the predictors identified were statistically significant, and the year variable, which initially had a high p-value was analyzed with a drop in deviance test, confirming the variable’s significance in the model. As expected, interaction terms between oxygen_use and height indicate reduced oxygen at higher elevations. The interaction term with year may also suggest changing oxygen technology over time.
+
+Limitations: 
+
+We did not examine all interaction terms between our predictor variables. These interaction terms might be impacting the accuracy of the model. Independence may also be influenced by particularly popular peaks.
+We remove all data entries with one or more NAs. These entries might influence the final model prediction.
+We did not explore other kinds of models other than logistic (after discovering linear models are probably not the best choice), but we fail to consider other possible models such as exponential and quadratic.
+We were unable to examine the distributions of all predictor variables to see their effects on the model
+I.e. There were likely more data from recent years
+
+In the future, if we have more time to work on this project extensively, we might look at multiple interactions between the predictor variables we have selected. We can also look for alternative treatments of NA values, as well as  comparing our model with other models. Determining if any independence issues are caused by popular peaks would be informative, as well.
+
+
+## 5. Appendix
+
+**5.1 Empirical Logit Plots**
+
+```{r}
+par(mfrow = c(2,2))
+emplogitplot1(success_expedition ~ year, data = merged_data, ngroups = 10)
+emplogitplot2(success_expedition ~ year + oxygen_used, data = merged_data, 
+              ngroups = 10, putlegend = "bottomright")
+
+#par(mfrow = c(1,2))
+emplogitplot1(success_expedition ~ height_metres_cent, data = merged_data, ngroups = 4)
+emplogitplot2(success_expedition ~ height_metres_cent + oxygen_used, data = merged_data, 
+              ngroups = 4, putlegend = "bottomright")
+
+#par(mfrow = c(1,2))
+emplogitplot1(success_expedition ~ member_count_cent, data = merged_data, ngroups = 8) 
+emplogitplot2(success_expedition ~ member_count_cent + oxygen_used, data = merged_data, 
+              ngroups = 8, putlegend = "bottomright")
+
+#par(mfrow = c(1,2))
+emplogitplot1(success_expedition ~ mean_age_cent, data = merged_data, ngroups = 8) 
+emplogitplot2(success_expedition ~ mean_age_cent + oxygen_used, data = merged_data, 
+              ngroups = 8, putlegend = "bottomright")
+
+emplogitplot1(success_expedition ~ hired_staff_deaths, data = merged_data, ngroups = "all") 
+# emplogitplot2(success_expedition ~ hired_staff_deaths + oxygen_used, data = merged_data, putlegend = "bottomright")
+```
